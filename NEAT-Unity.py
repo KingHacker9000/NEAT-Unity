@@ -1,5 +1,6 @@
 import random, math
 from __future__ import annotations
+from activation_functions import ActivationFunction, get_activation_function
 
 INPUT_LAYER = 0
 OUTPUT_LAYER = -1
@@ -45,6 +46,18 @@ class NodeGene:
         
         # Node is not Found
         raise ValueError
+    
+    def evaluate_activation(self, activation_func: ActivationFunction) -> None:
+        self.value = activation_func.forward(self.value)
+
+    def reset_value(self) -> None:
+        self.value = 0
+
+    def set_value(self, value: float) -> None:
+        self.value = value
+    
+    def add_value(self, value: float) -> None:
+        self.value += value
 
 class ConnectionGene:
     """
@@ -64,20 +77,78 @@ class ConnectionGene:
         self.innovation: int = innovation
         self.enabled: bool = enabled
 
+    def evaluate(self) -> None:
+        """Evaluate the Value and Add to the Output Node"""
+        self.out_node.add_value(self.in_node.value * self.weight)
+
 class Genome:
     """
     Contains List of Connection Genes
     """
 
-    def __init__(self) -> None:
+    def __init__(self, activation_func: ActivationFunction) -> None:
         
         self.connection_genes: list[ConnectionGene] = []
         self.nodes: list[list[NodeGene]] = [[], []]
         self.fitness: int = 0
         self.adjusted_fitness: int = None
+        self.activation_func: ActivationFunction = activation_func
 
-    def initialize_gen_zero(self, input_size, output_size):
-        innovation = 0
+    def forward_pass(self, input: list[float]) -> list[float]:
+        """Evaluate the Output of the Genome based on the given Input"""
+
+        assert len(input) == len(self.nodes[INPUT_LAYER]), f"Input Size: {len(input)} != Length of Input Nodes: {len(self.nodes[INPUT_LAYER])}"
+
+        self.reset_nodes()
+
+        self.set_input(input)
+
+        for layer in self.nodes[:OUTPUT_LAYER:]:
+            for node in layer:
+                if node not in self.nodes[INPUT_LAYER]:
+                    node.evaluate_activation(self.activation_func)
+                for conn in self.get_node_connections(node):
+                    conn.evaluate()
+
+        return self.get_output_values()
+    
+    def get_output_values(self) -> list[float]:
+        """Return a List of the Output Values"""
+        return [x.value for x in self.nodes[OUTPUT_LAYER]]
+
+    def get_node_connections(self, node: NodeGene) -> list[ConnectionGene]:
+        """Return a list of all Connections that have the given node as the input node"""
+        connections = []
+
+        for conn in self.connection_genes:
+            if conn.in_node == node and conn.enabled:
+                connections.append(conn)
+
+        return connections
+                
+    def set_input(self, input: list[float]) -> None:
+        """Set the Input Node Values"""
+        assert len(input) == len(self.nodes[INPUT_LAYER]), f"Input Size: {len(input)} != Length of Input Nodes: {len(self.nodes[INPUT_LAYER])}"
+
+        for i in range(len(self.nodes[INPUT_LAYER])):
+            input_node = self.nodes[INPUT_LAYER][i]
+            input_node.set_value(input[i])
+
+    def reset_nodes(self) -> None:
+        """
+        Reset Values of all Nodes to 0
+        """
+
+        for layer in self.nodes:
+            for node in layer:
+                node.reset_value()
+
+
+    def initialize_gen_zero(self, input_size, output_size, innovation_num: int = 0):
+        """
+        Initialize The Zeroth Generation with randomised weights
+        """
+        innovation = innovation_num
 
         for _ in range(input_size):
             node = NodeGene(innovation)
@@ -136,7 +207,7 @@ class Genome:
                 return conn
 
     def cross(self, other: Genome) -> Genome:
-        new_genome = Genome()
+        new_genome = Genome(self.activation_func)
 
         self.connection_genes.sort(key=lambda x: x.innovation)
         other.connection_genes.sort(key=lambda x: x.innovation)
@@ -189,7 +260,7 @@ class NEAT:
         - Mutation Sampling Distribution
     """
 
-    def __init__(self, input_size: int, output_size: int, population_size: int, c1: float, c2: float, c3: float, compatability_threshold: float, sampling_dist: SamplingDist) -> None:
+    def __init__(self, input_size: int, output_size: int, population_size: int, c1: float, c2: float, c3: float, compatability_threshold: float, sampling_dist: SamplingDist, activation_function_name: str = 'ReLU') -> None:
 
         self.input_size: int = input_size
         self.output_size: int = output_size
@@ -207,6 +278,8 @@ class NEAT:
         self.species_representatives: list[Genome] = [None]
         self.species: list[list[Genome]] = [[]]
 
+        self.activation_func: ActivationFunction = get_activation_function(activation_function_name)
+
         # Initialize Gen 0 Population
         self.initialize_population()
         self.select_species_rep()
@@ -214,7 +287,7 @@ class NEAT:
     def initialize_population(self) -> None:
         
         for _ in range(self.population_size):
-            g = Genome()
+            g = Genome(self.activation_func)
             g.initialize_gen_zero(self.input_size, self.output_size)
             self.population.append(g)
             self.species[0].append(g)
@@ -307,7 +380,6 @@ class NEAT:
                     print("NEW SPECIES ALERT!!")
                 self.species.append([genome,])
                 self.species_representatives.append(genome)
-
 
     def get_species(self, genome: Genome) -> int:
         
