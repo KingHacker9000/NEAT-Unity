@@ -1,2 +1,5 @@
 virtualenv/
 .vscode/
+__pycache__/
+Genomes/
+test.py
